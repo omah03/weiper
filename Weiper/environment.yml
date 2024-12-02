@@ -1,0 +1,7 @@
+name: weiper_env
+
+dependencies:
+  - python=3.10
+  - numpy
+  - Cython>=0.29.30
+  - ipykernel

@@ -1,0 +1,5 @@
+.egg-info
+.ipynb_checkpoints
+results
+OpenOOD/data
+OpenOOD/openood/results
