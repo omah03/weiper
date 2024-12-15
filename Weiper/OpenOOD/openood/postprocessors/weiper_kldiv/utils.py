@@ -62,9 +62,14 @@ def batch_histogram(
             max = samples.max(dim=0)[0]
         bins = linspace(min, max + eps, num=n_bins + 1)
     else:
-        min = bins_min_max[0]
-        max = bins_min_max[1]
-        bins = linspace(min, max + eps, num=n_bins + 1)[:, None].repeat(
+        min_val = bins_min_max[0]
+        max_val = bins_min_max[1]
+
+        # Convert min_val and max_val to tensors on the appropriate device
+        min_tensor = torch.tensor(min_val, device=device, dtype=samples.dtype)
+        max_tensor = torch.tensor(max_val + eps, device=device, dtype=samples.dtype)
+        
+        bins = linspace(min_tensor, max_tensor, num=n_bins + 1)[:, None].repeat(
             1, samples.shape[1]
         )
         bins = torch.cat(
@@ -218,7 +223,7 @@ def calculate_weiper_space(
 
 
 def calculate_density(
-    latents, min_train, max_train, n_bins=100, eps=1e-8, device="cpu", verbose=False
+    latents, min_train, max_train, n_bins=100, eps=1e-8, device="cpu", verbose=True
 ):
 
     density = []
@@ -321,7 +326,7 @@ def calculate_uncertainty(
 @torch.no_grad()
 def calculate_WeiPerKLDiv_score(
     model: torch.nn.Module,
-    latents: Iterable[torch.Tensor],
+    latents: torch.Tensor,
     n_bins: int = 100,
     perturbation_distance: float = 2.1,
     n_repeats: int = 100,
@@ -369,23 +374,36 @@ def calculate_WeiPerKLDiv_score(
 
     if verbose:
         print("Calculate perturbed logits...")
-    latents_weiper, W_tilde = calculate_weiper_space(
-        model,
-        latents,
-        perturbed_fc=perturbed_fc,
-        device="cpu",
-        perturbation_distance=perturbation_distance,
-        n_repeats=n_repeats,
-        noise_proportional=True,
-        constant_length=True,
-        batch_size=200,
-        ablation_noise_only=ablation_noise_only,
-    )
+
+    # Skip WeiPer perturbations if n_repeats=1 and perturbation_distance=0.0
+    if n_repeats == 1 and perturbation_distance == 0.0:
+        latents_weiper = latents
+        W_tilde = None
+    else:
+        latents_weiper, W_tilde = calculate_weiper_space(
+            model,
+            latents,
+            perturbed_fc=perturbed_fc,
+            device="cpu",
+            perturbation_distance=perturbation_distance,
+            n_repeats=n_repeats,
+            noise_proportional=True,
+            constant_length=True,
+            batch_size=200,
+            ablation_noise_only=ablation_noise_only,
+        )
 
     if verbose:
         print("Evaluate density...")
+
+    # If we have no precomputed train_min_max, we must define min/max from current latents
     if train_min_max is None:
-        # calculate min max estimates
+        # Compute min/max from latents and latents_weiper
+        min_train = latents.min().item()
+        max_train = latents.max().item()
+        min_weiper_train = latents_weiper.min().item()
+        max_weiper_train = latents_weiper.max().item()
+
         def minmax_plus_avg_gap(min_, max_):
             gap = (max_ - min_) / latents.shape[0]
             return min_ - gap, max_ + gap
@@ -397,6 +415,7 @@ def calculate_WeiPerKLDiv_score(
         train_min_max = (min_train, max_train), (min_weiper_train, max_weiper_train)
     else:
         (min_train, max_train), (min_weiper_train, max_weiper_train) = train_min_max
+
     densities = calculate_density(
         latents,
         min_train,
@@ -462,3 +481,4 @@ def calculate_WeiPerKLDiv_score(
     )
 
     return uncertainties
+
