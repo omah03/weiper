@@ -326,7 +326,7 @@ def calculate_uncertainty(
 @torch.no_grad()
 def calculate_WeiPerKLDiv_score(
     model: torch.nn.Module,
-    latents: torch.Tensor,
+    latents: Iterable[torch.Tensor],
     n_bins: int = 100,
     perturbation_distance: float = 2.1,
     n_repeats: int = 100,
@@ -338,7 +338,7 @@ def calculate_WeiPerKLDiv_score(
     lambda_2: float = 1,
     symmetric: bool = True,
     device: str = "cpu",
-    verbose: bool = False,
+    verbose: bool = True,
     ablation_noise_only: bool = False,
     train_min_max: tuple = None,
     train_densities: Iterable[torch.Tensor] = None,
@@ -371,15 +371,17 @@ def calculate_WeiPerKLDiv_score(
         Union[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]: uncertainties, densities, latents_weiper, train_densities, W_tilde
     """
     model.eval()
-
     if verbose:
         print("Calculate perturbed logits...")
-
-    # Skip WeiPer perturbations if n_repeats=1 and perturbation_distance=0.0
+        
     if n_repeats == 1 and perturbation_distance == 0.0:
+        # No perturbation scenario for intermediate layers
+        # Just let latents_weiper = latents (or some identity)
         latents_weiper = latents
         W_tilde = None
+
     else:
+        # Original weiper calculation for penultimate layer
         latents_weiper, W_tilde = calculate_weiper_space(
             model,
             latents,
@@ -395,15 +397,8 @@ def calculate_WeiPerKLDiv_score(
 
     if verbose:
         print("Evaluate density...")
-
-    # If we have no precomputed train_min_max, we must define min/max from current latents
     if train_min_max is None:
-        # Compute min/max from latents and latents_weiper
-        min_train = latents.min().item()
-        max_train = latents.max().item()
-        min_weiper_train = latents_weiper.min().item()
-        max_weiper_train = latents_weiper.max().item()
-
+        # calculate min max estimates
         def minmax_plus_avg_gap(min_, max_):
             gap = (max_ - min_) / latents.shape[0]
             return min_ - gap, max_ + gap
@@ -415,7 +410,6 @@ def calculate_WeiPerKLDiv_score(
         train_min_max = (min_train, max_train), (min_weiper_train, max_weiper_train)
     else:
         (min_train, max_train), (min_weiper_train, max_weiper_train) = train_min_max
-
     densities = calculate_density(
         latents,
         min_train,
@@ -481,4 +475,3 @@ def calculate_WeiPerKLDiv_score(
     )
 
     return uncertainties
-
