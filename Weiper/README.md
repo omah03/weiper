@@ -68,7 +68,7 @@ Evolution of the densities of specific penultimate output dimensions over the tr
 
 # Citation
 
-If you use WeiPer in your reasearch, please cite our paper:
+If you use WeiPer in your research, please cite our paper:
 ```
 @article{granz2024weiper,
   title={WeiPer: OOD Detection using Weight Perturbations of Class Projections},
