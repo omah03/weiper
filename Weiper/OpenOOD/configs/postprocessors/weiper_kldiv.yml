@@ -1,44 +1,64 @@
 postprocessor:
   APS_mode: true
   name: weiper_kldiv
+
   postprocessor_args:
     n_repeats: 100
+
+    # Choose aggregator_mode among {"none", "mdcdf", "sum", "weighted_sum"}
+    aggregator_mode: "none"
+
+    # If aggregator_mode="mdcdf", we use aggregator_mdcdf with the following method:
+    mdcdf_method: "kde"  # or "gmm","dummy" etc.
+    mdcdf_invert: false  # if true => 1 - cdf
+    mdcdf_debug: true
+    agg_kwargs:
+      bandwidth: 0.5  # used by the KDE aggregator
+
+    # WeiPer KLDIV hyperparameters
     lambda_1: 2.5
-    lambda_2: 0.1
+    lambda_2: 0 #0.1
     n_bins: 100
-    perturbation_distance: 1.8
+    layer_names: [4]         # single-layer (penultimate). If aggregator_mode="none" => original WeiPer
+    projection_type: "linear"
+    random_conv_num_projections: 20
+    random_conv_in_channels: 512
+    random_conv_out_channels: 64
+    random_conv_kernel_size: 3
+    perturbation_distance: 10 #1.8
     smoothing: 4
     smoothing_perturbed: 15
     exact_minmax: true
     n_samples_for_setup: 300000
+
   postprocessor_sweep:
     lambda_1_list:
-    - 0.1
-    - 1
-    - 2.5
-    - 4
+      - 0.1
+      - 1
+      - 2.5
+      - 4
     lambda_2_list:
-    - 0.1
-    - 0.25
-    - 1
-    - 2.5
-    - 5
+      - 0.1
+      - 0.25
+      - 1
+      - 2.5
+      - 5
     n_bins_list:
-    - 60
-    - 80
-    - 100
+      - 60
+      - 80
+      - 100
     perturbation_distance_list:
-    - 1.8
-    - 2.0
-    - 2.2
-    - 2.4
+      - 1.8
+      - 2.0
+      - 2.2
+      - 2.4
     smoothing_list:
-    - 4
-    - 8
-    - 12
-    - 20
-    - 40
+      - 4
+      - 8
+      - 12
+      - 20
+      - 40
     smoothing_perturbed_list:
-    - 15
-    - 25
-    - 40
+      - 15
+      - 25
+      - 40

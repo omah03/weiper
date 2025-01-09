@@ -151,9 +151,9 @@ def calculate_weiper_space(
     latents: torch.Tensor,
     perturbed_fc: torch.nn.Module = None,
     device: str = "cpu",
-    perturbation_distance: float = 2.1,
+    perturbation_distance: float = 2.1, #2.1
     n_repeats: int = 50,
-    noise_proportional: bool = True,
+    noise_proportional: bool = False,
     constant_length: bool = True,
     batch_size: int = 256,
     ablation_noise_only: bool = False,
@@ -195,6 +195,16 @@ def calculate_weiper_space(
             pert * model.fc.weight.norm(dim=1)[:, None] for pert in random_perturbs
         ]
 
+    with torch.no_grad():
+        for idx, p in enumerate(random_perturbs):
+            curr_norm = p.norm(dim=1).mean().item()
+            print(f"[DEBUG]  Perturb {idx} => avg norm {curr_norm:.5f}")
+
+    # Or do a single summary:
+    avg_norms = [p.norm(dim=1).mean().cpu().item() for p in random_perturbs]
+    print(f"[DEBUG] WeiPer average noise norm => {np.mean(avg_norms):.5f}")
+
+
     def build_lin():
         weight = model.fc.weight.data
         bias = model.fc.bias.data
@@ -223,7 +233,7 @@ def calculate_weiper_space(
 
 
 def calculate_density(
-    latents, min_train, max_train, n_bins=100, eps=1e-8, device="cpu", verbose=True
+    latents, min_train, max_train, n_bins=100, eps=1e-8, device="cpu", verbose=False
 ):
 
     density = []
@@ -323,12 +333,13 @@ def calculate_uncertainty(
     return torch.cat(uncertainty, dim=-1)[0]
 
 
+
 @torch.no_grad()
 def calculate_WeiPerKLDiv_score(
     model: torch.nn.Module,
-    latents: Iterable[torch.Tensor],
+    latents: torch.Tensor,
     n_bins: int = 100,
-    perturbation_distance: float = 2.1,
+    perturbation_distance: float = 2.1, #2.1
     n_repeats: int = 100,
     smoothing: int = 20,
     smoothing_perturbed: int = 20,
@@ -338,50 +349,24 @@ def calculate_WeiPerKLDiv_score(
     lambda_2: float = 1,
     symmetric: bool = True,
     device: str = "cpu",
-    verbose: bool = True,
+    verbose: bool = False,
     ablation_noise_only: bool = False,
     train_min_max: tuple = None,
     train_densities: Iterable[torch.Tensor] = None,
     perturbed_fc: torch.nn.Module = None,
     **params,
-) -> Union[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
-    """Apply the WeiPerKLDiv score to the given latents.
+):
 
-    Args:
-        model (torch.nn.Module): Instance of the neural network.
-        latents (Iterable[torch.Tensor]): Train latents, test latents, ood latents.
-        densities (torch.Tensor, optional): If the densities are already calculated, they can be referenced here. Defaults to None.
-        n_bins (int, optional): Number of bins. Defaults to 100.
-        perturbation_distance (float, optional): (Relative) perturbation distance (delta in the paper). Defaults to 2.1.
-        n_repeats (int, optional): The number of repeats (r in the paper). Defaults to 100.
-        smoothing (int, optional): Smoothing size (s_1 in the paper) for the density. Defaults to 20.
-        smoothing_perturbed (int, optional): Smoothing size (s_2 in the paper) for the perturbed density. Defaults to 20.
-        epsilon (float, optional): Epsilon added to q to prevent zero entries. Defaults to 0.025.
-        lambda_1 (float, optional): Lambda_1 (as in the paper). Defaults to 1.
-        lambda_2 (float, optional): Lambda_2 (as in the paper). Defaults to 1.
-        symmetric (bool, optional): Calculate KLD(p,q) + KLD(q,p) if True. Defaults to True.
-        device (str, optional): Cuda device or CPU. Defaults to "cpu".
-        verbose (bool, optional): Whether to show progress bars. Defaults to False.
-        ablation_noise_only (bool, optional): Use weight independent random projections. Defaults to False.
-        train_min_max (tuple, optional): If the min and max of the train set are already calculated, they can be referenced here. Defaults to None.
-        train_densities (Iterable[torch.Tensor], optional): If the densities of the train set are already calculated,
-        they can be referenced here. Defaults to None.
-
-    Returns:
-        Union[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]: uncertainties, densities, latents_weiper, train_densities, W_tilde
-    """
     model.eval()
+
     if verbose:
         print("Calculate perturbed logits...")
-        
+
+    # Skip WeiPer perturbations if n_repeats=1 and perturbation_distance=0.0
     if n_repeats == 1 and perturbation_distance == 0.0:
-        # No perturbation scenario for intermediate layers
-        # Just let latents_weiper = latents (or some identity)
         latents_weiper = latents
         W_tilde = None
-
     else:
-        # Original weiper calculation for penultimate layer
         latents_weiper, W_tilde = calculate_weiper_space(
             model,
             latents,
@@ -397,8 +382,15 @@ def calculate_WeiPerKLDiv_score(
 
     if verbose:
         print("Evaluate density...")
+
+    # If we have no precomputed train_min_max, we must define min/max from current latents
     if train_min_max is None:
-        # calculate min max estimates
+        # Compute min/max from latents and latents_weiper
+        min_train = latents.min().item()
+        max_train = latents.max().item()
+        min_weiper_train = latents_weiper.min().item()
+        max_weiper_train = latents_weiper.max().item()
+
         def minmax_plus_avg_gap(min_, max_):
             gap = (max_ - min_) / latents.shape[0]
             return min_ - gap, max_ + gap
@@ -410,6 +402,7 @@ def calculate_WeiPerKLDiv_score(
         train_min_max = (min_train, max_train), (min_weiper_train, max_weiper_train)
     else:
         (min_train, max_train), (min_weiper_train, max_weiper_train) = train_min_max
+
     densities = calculate_density(
         latents,
         min_train,
