@@ -11,7 +11,7 @@ from .weiper_kldiv.utils import (
     calculate_WeiPerKLDiv_score,
     calculate_weiper_space,
 )
-from aggregator_mdcdf import MDCDFAggregator  # aggregator if aggregator_mode="mdcdf"
+#from aggregator_mdcdf import MDCDFAggregator  # aggregator if aggregator_mode="mdcdf"
 
 
 class WeiPerKLDivPostprocessor(BasePostprocessor):
@@ -145,12 +145,12 @@ class WeiPerKLDivPostprocessor(BasePostprocessor):
 
         # aggregator_mode=="mdcdf" => build or load aggregator ID-scores
         print("[DEBUG] aggregator_mode='mdcdf' => building/loading aggregator NPZ.")
-        self.mdcdf_aggregator = MDCDFAggregator(
-            method=self.method,
-            invert_cdf=self.invert_cdf,
-            debug_enabled=self.agg_debug,
-            **self.agg_kwargs
-        )
+        # self.mdcdf_aggregator = MDCDFAggregator(
+        #     method=self.method,
+        #     invert_cdf=self.invert_cdf,
+        #     debug_enabled=self.agg_debug,
+        #     **self.agg_kwargs
+        # )
 
         # define the file name for the user-layers
         sorted_lay = sorted(self.layer_names)

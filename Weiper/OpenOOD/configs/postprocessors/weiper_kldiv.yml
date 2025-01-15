@@ -25,7 +25,7 @@ postprocessor:
     random_conv_in_channels: 512
     random_conv_out_channels: 64
     random_conv_kernel_size: 3
-    perturbation_distance: 10 #1.8
+    perturbation_distance: 1.8 #1.8
     smoothing: 4
     smoothing_perturbed: 15
     exact_minmax: true
