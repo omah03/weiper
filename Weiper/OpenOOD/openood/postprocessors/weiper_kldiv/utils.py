@@ -4,6 +4,8 @@ from tqdm import tqdm
 from collections.abc import Iterable
 import torch.nn.functional as F
 from typing import Union
+import torch.nn as nn
+import os 
 
 
 @torch.jit.script
@@ -142,17 +144,16 @@ class UniformKernel(torch.nn.Module):
 
 @torch.no_grad()
 def calculate_weiper_space(
-    model: torch.nn.Module,
+    model: nn.Module,
     latents: torch.Tensor,
-    perturbed_fc: torch.nn.Module = None,
+    perturbed_fc: nn.Module = None,
     device: str = "cpu",
+    fc_dir: str = "./checkpoints/fc_layers",
+    start_epoch: int = 101, #doesnt matter
+    end_epoch: int = 200, #doesnt matter    
     perturbation_distance: float = 2.1,
-    n_repeats: int = 50,
-    noise_proportional: bool = True,
-    constant_length: bool = True,
     batch_size: int = 256,
-    ablation_noise_only: bool = False,
-) -> Union[torch.Tensor, torch.Tensor]:
+) -> Union[torch.Tensor, nn.Module, int, int]:
     """Creates the perturbed fully connected layer (curly H in the paper)
     and calculates the perturbed logits from the penultimate latents.
 
@@ -173,48 +174,62 @@ def calculate_weiper_space(
     Returns:
         Union[torch.Tensor, torch.Tensor]: noise_logits, perturbed_fc
     """
-    if perturbed_fc is not None:
-        perturbed_fc = perturbed_fc.to(device)
 
-    random_perturbs = [
-        perturbation_distance
-        * (
-            F.normalize(torch.randn_like(model.fc.weight.data), dim=1)
-            if constant_length
-            else torch.randn_like(model.fc.weight.data)
-        )
-        for _ in range(n_repeats)
-    ]
-    if noise_proportional:
-        random_perturbs = [
-            pert * model.fc.weight.norm(dim=1)[:, None] for pert in random_perturbs
-        ]
+    eps_norm = 1e-8 
+    snapshot_weights = []
+    snapshot_biases = []
+
+
+    ref_norm = model.fc.weight.norm(p=2, dim=1, keepdim=True) 
+    ref_norm = ref_norm.to(device) 
+
+    for ep in range(start_epoch, end_epoch + 1):
+        fc_path = os.path.join(fc_dir, f"fc_epoch_{ep}.pth")
+        if not os.path.exists(fc_path):
+            raise FileNotFoundError(f"[ERROR] Missing snapshot => {fc_path}")
+        fc_state = torch.load(fc_path, map_location=device)
+        w = fc_state["weight"]  
+        b = fc_state["bias"]   
+        norm = w.norm(p=2, dim=1, keepdim=True) + eps_norm
+        w_normalized = w / norm
+        w_scaled = w_normalized * (ref_norm * perturbation_distance)
+        snapshot_weights.append(w_scaled)
+        snapshot_biases.append(b)
+
+    stacked_weight = torch.cat(snapshot_weights, dim=0)  
+    stacked_bias   = torch.cat(snapshot_biases, dim=0)    
+
+    M = end_epoch - start_epoch + 1    
+    C = snapshot_weights[0].shape[0]       
+    D = snapshot_weights[0].shape[1]
 
     def build_lin():
-        weight = model.fc.weight.data
-        bias = model.fc.bias.data
-        if ablation_noise_only:
-            weight = 0 * weight
-            bias = 0 * bias
-        weight_ = torch.cat([weight + pert for pert in random_perturbs], dim=0)
-        bias_ = torch.cat([bias for _ in range(n_repeats)], dim=0)
-
-        perturbed_fc = torch.nn.Linear(
-            latents[0].shape[-1], n_repeats * weight.shape[0]
-        )
-        perturbed_fc.weight.data = weight_
-        perturbed_fc.bias.data = bias_
-        perturbed_fc.to(device)
-        return perturbed_fc
+        big_fc = nn.Linear(D, M * C, bias=True)
+        with torch.no_grad():
+            big_fc.weight.copy_(stacked_weight)
+            big_fc.bias.copy_(stacked_bias)
+        big_fc.to(device)
+        return big_fc
 
     if perturbed_fc is None:
         perturbed_fc = build_lin()
+    else:
+        if perturbed_fc.weight.shape != (M * C, D):
+            perturbed_fc = build_lin()
+        else:
+            with torch.no_grad():
+                perturbed_fc.weight.copy_(stacked_weight)
+                perturbed_fc.bias.copy_(stacked_bias)
 
-    weiper_logits = torch.cat(
-        [perturbed_fc(x.to(device)).cpu() for x in latents.split(batch_size)], dim=0
-    )
+    print(f"[DEBUG] => Built big_fc with shape: {perturbed_fc.weight.shape}, bias: {perturbed_fc.bias.shape}")
 
-    return weiper_logits, perturbed_fc
+    output_list = []
+    for chunk in latents.split(batch_size):
+        out = perturbed_fc(chunk.to(device))
+        output_list.append(out.cpu())
+    weiper_logits = torch.cat(output_list, dim=0)
+
+    return weiper_logits, perturbed_fc, M, C
 
 
 def calculate_density(
@@ -320,11 +335,11 @@ def calculate_uncertainty(
 
 @torch.no_grad()
 def calculate_WeiPerKLDiv_score(
-    model: torch.nn.Module,
-    latents: Iterable[torch.Tensor],
+    model: nn.Module,
+    latents: torch.Tensor,
     n_bins: int = 100,
-    perturbation_distance: float = 2.1,
-    n_repeats: int = 100,
+    perturbation_distance: float = 2.1,  
+    n_repeats: int = 100,                
     smoothing: int = 20,
     smoothing_perturbed: int = 20,
     epsilon: float = 0.01,
@@ -333,11 +348,15 @@ def calculate_WeiPerKLDiv_score(
     lambda_2: float = 1,
     symmetric: bool = True,
     device: str = "cpu",
-    verbose: bool = False,
+    verbose: bool = True,
     ablation_noise_only: bool = False,
     train_min_max: tuple = None,
     train_densities: Iterable[torch.Tensor] = None,
-    perturbed_fc: torch.nn.Module = None,
+    perturbed_fc: nn.Module = None,
+    return_msp_only: bool = True,
+    fc_dir: str = "./checkpoints/fc_layers",
+    start_epoch: int = 101,
+    end_epoch: int = 200,
     **params,
 ) -> Union[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
     """Apply the WeiPerKLDiv score to the given latents.
@@ -362,6 +381,14 @@ def calculate_WeiPerKLDiv_score(
         train_densities (Iterable[torch.Tensor], optional): If the densities of the train set are already calculated,
         they can be referenced here. Defaults to None.
 
+        Snapshot-based WeiPer approach:
+      - Loads snapshots from epochs [start_epoch, end_epoch],
+      - Stacks them using the scaling in calculate_weiper_space,
+      - Computes logits on the given latents,
+      - Reshapes the logits to (B, M, C), averages over snapshots, applies softmax,
+      - Returns the Maximum Softmax Probability (MSP) for each sample
+
+
     Returns:
         Union[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]: uncertainties, densities, latents_weiper, train_densities, W_tilde
     """
@@ -369,17 +396,17 @@ def calculate_WeiPerKLDiv_score(
 
     if verbose:
         print("Calculate perturbed logits...")
-    latents_weiper, W_tilde = calculate_weiper_space(
+
+    latents_weiper, W_tilde, M, C = calculate_weiper_space(
         model,
         latents,
         perturbed_fc=perturbed_fc,
-        device="cpu",
+        device=device,
+        fc_dir=fc_dir,
+        start_epoch=start_epoch,
+        end_epoch=end_epoch,
         perturbation_distance=perturbation_distance,
-        n_repeats=n_repeats,
-        noise_proportional=True,
-        constant_length=True,
         batch_size=200,
-        ablation_noise_only=ablation_noise_only,
     )
 
     if verbose:
@@ -423,42 +450,44 @@ def calculate_WeiPerKLDiv_score(
     else:
         densities_train_mean, densities_weiper_train_mean = train_densities
 
-    def calculate_weiper_pred(logits):
-        n_classes = int(logits.shape[-1] / n_repeats)
-        logits = logits.to(device)
-        weiper_pred = []
-        # calculate WeiPer predictions for each perturbed space
-        for i in range(n_repeats):
-            weiper_pred.append(
-                logits[:, i * n_classes : (i + 1) * n_classes]
-                .softmax(dim=-1)
-                .max(dim=-1)[0][:, None]
-            )
-        return torch.cat(weiper_pred, dim=-1).mean(dim=-1)
+    def calculate_weiper_pred(logits: torch.Tensor) -> torch.Tensor:
+        B, total_dim = logits.shape
+        if total_dim != M * C:
+            raise ValueError(f"Dim mismatch: got {total_dim}, expected {M * C}")
+        logits_3d = logits.view(B, M, C)
+        avg_logits = logits_3d.mean(dim=1)  # shape: (B, C)
+        msp = torch.softmax(avg_logits, dim=1).max(dim=1)[0]  # shape: (B,)
+        return msp
 
     msp_weiper = calculate_weiper_pred(latents_weiper)
 
-    kernel = UniformKernel(100, smoothing).to(device)
-    kernel_noise = UniformKernel(100, smoothing_perturbed).to(device)
-    uncertainties = calculate_uncertainty(
-        densities,
-        densities_train_mean,
-        kernel,
-        eps=epsilon,
-        device=device,
-        symmetric=symmetric,
-    )
-    uncertainties_weiper = calculate_uncertainty(
-        densities_weiper,
-        densities_weiper_train_mean,
-        kernel_noise,
-        eps=epsilon_noise,
-        device=device,
-        symmetric=symmetric,
-    )
+    if return_msp_only:
+        if verbose:
+            print("[DEBUG] => Returning MSP only from snapshot-based aggregator with scaling.")
+        return msp_weiper
+    
+    else:
+        kernel = UniformKernel(100, smoothing).to(device)
+        kernel_noise = UniformKernel(100, smoothing_perturbed).to(device)
+        uncertainties = calculate_uncertainty(
+            densities,
+            densities_train_mean,
+            kernel,
+            eps=epsilon,
+            device=device,
+            symmetric=symmetric,
+        )
+        uncertainties_weiper = calculate_uncertainty(
+            densities_weiper,
+            densities_weiper_train_mean,
+            kernel_noise,
+            eps=epsilon_noise,
+            device=device,
+            symmetric=symmetric,
+        )
 
-    uncertainties = -(
-        uncertainties + lambda_1 * uncertainties_weiper - lambda_2 * msp_weiper
-    )
+        uncertainties = -(
+            uncertainties + lambda_1 * uncertainties_weiper - lambda_2 * msp_weiper
+        )
 
-    return uncertainties
+        return uncertainties
