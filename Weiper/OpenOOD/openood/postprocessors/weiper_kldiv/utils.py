@@ -193,6 +193,7 @@ def calculate_weiper_space(
         norm = w.norm(p=2, dim=1, keepdim=True) + eps_norm
         w_normalized = w / norm
         w_scaled = w_normalized * (ref_norm * perturbation_distance)
+        # w_scaled = w
         snapshot_weights.append(w_scaled)
         snapshot_biases.append(b)
 
@@ -411,53 +412,55 @@ def calculate_WeiPerKLDiv_score(
 
     if verbose:
         print("Evaluate density...")
-    if train_min_max is None:
-        # calculate min max estimates
-        def minmax_plus_avg_gap(min_, max_):
-            gap = (max_ - min_) / latents.shape[0]
-            return min_ - gap, max_ + gap
+    # if train_min_max is None:
+    #     # calculate min max estimates
+    #     def minmax_plus_avg_gap(min_, max_):
+    #         gap = (max_ - min_) / latents.shape[0]
+    #         return min_ - gap, max_ + gap
 
-        min_train, max_train = minmax_plus_avg_gap(min_train, max_train)
-        min_weiper_train, max_weiper_train = minmax_plus_avg_gap(
-            min_weiper_train, max_weiper_train
-        )
-        train_min_max = (min_train, max_train), (min_weiper_train, max_weiper_train)
-    else:
-        (min_train, max_train), (min_weiper_train, max_weiper_train) = train_min_max
-    densities = calculate_density(
-        latents,
-        min_train,
-        max_train,
-        n_bins=n_bins,
-        device=device,
-    )
-    densities_weiper = calculate_density(
-        latents_weiper,
-        min_weiper_train,
-        max_weiper_train,
-        n_bins=n_bins,
-        device=device,
-    )
-    if train_densities is None:
-        densities_train_mean = densities.mean(dim=-1)[:, None]
-        densities_weiper_train_mean = densities_weiper.mean(dim=-1)[:, None]
-        return (
-            densities_train_mean,
-            densities_weiper_train_mean,
-            ((min_train, max_train), (min_weiper_train, max_weiper_train)),
-            W_tilde,
-        )
-    else:
-        densities_train_mean, densities_weiper_train_mean = train_densities
+    #     min_train, max_train = minmax_plus_avg_gap(min_train, max_train)
+    #     min_weiper_train, max_weiper_train = minmax_plus_avg_gap(
+    #         min_weiper_train, max_weiper_train
+    #     )
+    #     train_min_max = (min_train, max_train), (min_weiper_train, max_weiper_train)
+    # else:
+    #     (min_train, max_train), (min_weiper_train, max_weiper_train) = train_min_max
+    # densities = calculate_density(
+    #     latents,
+    #     min_train,
+    #     max_train,
+    #     n_bins=n_bins,
+    #     device=device,
+    # )
+    # densities_weiper = calculate_density(
+    #     latents_weiper,
+    #     min_weiper_train,
+    #     max_weiper_train,
+    #     n_bins=n_bins,
+    #     device=device,
+    # )
+    # if train_densities is None:
+    #     densities_train_mean = densities.mean(dim=-1)[:, None]
+    #     densities_weiper_train_mean = densities_weiper.mean(dim=-1)[:, None]
+    #     return (
+    #         densities_train_mean,
+    #         densities_weiper_train_mean,
+    #         ((min_train, max_train), (min_weiper_train, max_weiper_train)),
+    #         W_tilde,
+    #     )
+    # else:
+    #     densities_train_mean, densities_weiper_train_mean = train_densities
 
     def calculate_weiper_pred(logits: torch.Tensor) -> torch.Tensor:
         B, total_dim = logits.shape
         if total_dim != M * C:
             raise ValueError(f"Dim mismatch: got {total_dim}, expected {M * C}")
         logits_3d = logits.view(B, M, C)
-        avg_logits = logits_3d.mean(dim=1)  # shape: (B, C)
-        msp = torch.softmax(avg_logits, dim=1).max(dim=1)[0]  # shape: (B,)
-        return msp
+        prob = torch.softmax(logits_3d, dim=2)
+        max_prob = prob.max(dim=2)[0]  
+        avg_max_prob = max_prob.mean(dim=1) 
+        return avg_max_prob
+
 
     msp_weiper = calculate_weiper_pred(latents_weiper)
 
@@ -466,28 +469,28 @@ def calculate_WeiPerKLDiv_score(
             print("[DEBUG] => Returning MSP only from snapshot-based aggregator with scaling.")
         return msp_weiper
     
-    else:
-        kernel = UniformKernel(100, smoothing).to(device)
-        kernel_noise = UniformKernel(100, smoothing_perturbed).to(device)
-        uncertainties = calculate_uncertainty(
-            densities,
-            densities_train_mean,
-            kernel,
-            eps=epsilon,
-            device=device,
-            symmetric=symmetric,
-        )
-        uncertainties_weiper = calculate_uncertainty(
-            densities_weiper,
-            densities_weiper_train_mean,
-            kernel_noise,
-            eps=epsilon_noise,
-            device=device,
-            symmetric=symmetric,
-        )
+    # else:
+    #     kernel = UniformKernel(100, smoothing).to(device)
+    #     kernel_noise = UniformKernel(100, smoothing_perturbed).to(device)
+    #     uncertainties = calculate_uncertainty(
+    #         densities,
+    #         densities_train_mean,
+    #         kernel,
+    #         eps=epsilon,
+    #         device=device,
+    #         symmetric=symmetric,
+    #     )
+    #     uncertainties_weiper = calculate_uncertainty(
+    #         densities_weiper,
+    #         densities_weiper_train_mean,
+    #         kernel_noise,
+    #         eps=epsilon_noise,
+    #         device=device,
+    #         symmetric=symmetric,
+    #     )
 
-        uncertainties = -(
-            uncertainties + lambda_1 * uncertainties_weiper - lambda_2 * msp_weiper
-        )
+    #     uncertainties = -(
+    #         uncertainties + lambda_1 * uncertainties_weiper - lambda_2 * msp_weiper
+    #     )
 
-        return uncertainties
+    #     return uncertainties
