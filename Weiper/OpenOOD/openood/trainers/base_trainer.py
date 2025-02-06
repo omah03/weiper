@@ -4,6 +4,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.data import DataLoader
 from tqdm import tqdm
+import os
 
 import openood.utils.comm as comm
 from openood.utils import Config
@@ -20,7 +21,7 @@ class BaseTrainer:
         self.config = config
 
         self.optimizer = torch.optim.SGD(
-            net.parameters(),
+        net.parameters(),
             config.optimizer.lr,
             momentum=config.optimizer.momentum,
             weight_decay=config.optimizer.weight_decay,
@@ -71,13 +72,26 @@ class BaseTrainer:
             # exponential moving average, show smooth values
             with torch.no_grad():
                 loss_avg = loss_avg * 0.8 + float(loss) * 0.2
+
+        # Step the scheduler at the epoch level
         self.scheduler(epoch_idx).step()
-        # comm.synchronize()
-        if epoch_idx % 10 == 9:
-            torch.save(
-                self.net.state_dict(),
-                f"./results/{self.config.dataset.name}_{self.net.__class__.__name__.lower()}_base_e300_lr0.1_pixmix/e{epoch_idx}",
-            )
+
+        # Save checkpoint every 10 epochs (here at epochs where epoch_idx % 10 == 5)
+        if epoch_idx >= 90:
+            save_dir = f"./results/{self.config.dataset.name}_{self.net.__class__.__name__.lower()}_base_e300_lr0.1_pixmix"
+            os.makedirs(save_dir, exist_ok=True)
+            save_path = os.path.join(save_dir, f"e{epoch_idx}.pth")
+            
+            torch.save({
+                "epoch": epoch_idx,
+                "state_dict": self.net.state_dict(),
+                "optimizer_state_dict": self.optimizer.state_dict(),
+                "scheduler_state_dict": None if not callable(self.scheduler) else self.scheduler(epoch_idx).state_dict(),
+                "config": self.config,
+            }, save_path)
+
+            print(f"[INFO] Model and optimizer saved at: {save_path}")
+
         metrics = {}
         metrics["epoch_idx"] = epoch_idx
         metrics["loss"] = self.save_metrics(loss_avg)
@@ -87,5 +101,4 @@ class BaseTrainer:
     def save_metrics(self, loss_avg):
         all_loss = comm.gather(loss_avg)
         total_losses_reduced = np.mean([x for x in all_loss])
-
         return total_losses_reduced
