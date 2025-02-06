@@ -27,11 +27,11 @@ class BaseTrainer:
             weight_decay=config.optimizer.weight_decay,
             nesterov=True,
         )
-        s = [
-            torch.optim.lr_scheduler.StepLR(self.optimizer, step_size=60, gamma=0.2),
-            torch.optim.lr_scheduler.StepLR(self.optimizer, step_size=40, gamma=0.2),
-        ]
-        self.scheduler = lambda step: (s[0] if step < 120 else s[1])
+        # s = [
+        #     torch.optim.lr_scheduler.StepLR(self.optimizer, step_size=60, gamma=0.2),
+        #     torch.optim.lr_scheduler.StepLR(self.optimizer, step_size=40, gamma=0.2),
+        # ]
+        # self.scheduler = lambda step: (s[0] if step < 120 else s[1])
         self.scheduler = torch.optim.lr_scheduler.LambdaLR(
             self.optimizer,
             lr_lambda=lambda step: cosine_annealing(
