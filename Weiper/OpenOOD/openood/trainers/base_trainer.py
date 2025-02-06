@@ -32,15 +32,15 @@ class BaseTrainer:
             torch.optim.lr_scheduler.StepLR(self.optimizer, step_size=40, gamma=0.2),
         ]
         self.scheduler = lambda step: (s[0] if step < 120 else s[1])
-        # self.scheduler = torch.optim.lr_scheduler.LambdaLR(
-        #     self.optimizer,
-        #     lr_lambda=lambda step: cosine_annealing(
-        #         step,
-        #         config.optimizer.num_epochs * len(train_loader),
-        #         1,
-        #         1e-6 / config.optimizer.lr,
-        #     ),
-        # )
+        self.scheduler = torch.optim.lr_scheduler.LambdaLR(
+            self.optimizer,
+            lr_lambda=lambda step: cosine_annealing(
+                step,
+                config.optimizer.num_epochs * len(train_loader),
+                1,
+                1e-6 / config.optimizer.lr,
+            ),
+        )
 
     def train_epoch(self, epoch_idx):
         self.net.train()
@@ -67,14 +67,12 @@ class BaseTrainer:
             self.optimizer.zero_grad()
             loss.backward()
             self.optimizer.step()
-            # self.scheduler.step()
+            self.scheduler.step()
 
             # exponential moving average, show smooth values
             with torch.no_grad():
                 loss_avg = loss_avg * 0.8 + float(loss) * 0.2
 
-        # Step the scheduler at the epoch level
-        self.scheduler(epoch_idx).step()
 
         # Save checkpoint every 10 epochs (here at epochs where epoch_idx % 10 == 5)
         if epoch_idx >= 90:
@@ -87,8 +85,8 @@ class BaseTrainer:
                 "state_dict": self.net.state_dict(),
                 "optimizer_state_dict": self.optimizer.state_dict(),
                 "scheduler_state_dict": None if not callable(self.scheduler) else self.scheduler(epoch_idx).state_dict(),
-                "config": self.config,
-            }, save_path)
+                "config": self.config
+                            }, save_path)
 
             print(f"[INFO] Model and optimizer saved at: {save_path}")
 
