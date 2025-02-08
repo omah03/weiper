@@ -199,7 +199,7 @@ class Evaluator:
         all_labels = torch.cat(all_labels)
         return all_preds, all_labels
 
-    def eval_acc(self, data_name: str = "id", verbose: bool = False) -> float:
+    def eval_acc(self, data_name: str = "id", verbose: bool = True) -> float:
         if data_name == "id":
             if self.metrics["id_acc"] is not None:
                 return self.metrics["id_acc"]
@@ -269,7 +269,7 @@ class Evaluator:
             raise ValueError(f"Unknown data name {data_name}")
 
     def eval_ood(
-        self, fsood: bool = False, progress: bool = True, verbose: bool = False
+        self, fsood: bool = False, progress: bool = True, verbose: bool = True
     ):
         id_name = "id" if not fsood else "csid"
         task = "ood" if not fsood else "fsood"
@@ -377,7 +377,7 @@ class Evaluator:
         id_list: List[np.ndarray],
         ood_split: str = "near",
         progress: bool = True,
-        verbose: bool = False,
+        verbose: bool = True,
     ):
         if verbose:
             print(f"Processing {ood_split} ood...", flush=True)

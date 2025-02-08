@@ -49,7 +49,7 @@ DATA_INFO = {
                 "imglist_path": "benchmark_imglist/cifar10/val_tin.txt",
             },
             "near": {
-                "datasets": ["cifar100", "tin"],
+                "datasets": ["cifar100"],     # , "tin"
                 "cifar100": {
                     "data_dir": "images_classic/",
                     "imglist_path": "benchmark_imglist/cifar10/test_cifar100.txt",
@@ -60,7 +60,7 @@ DATA_INFO = {
                 },
             },
             "far": {
-                "datasets": ["mnist", "svhn", "texture", "places365"],
+                "datasets": ["mnist"], # , "svhn", "texture", "places365"
                 "mnist": {
                     "data_dir": "images_classic/",
                     "imglist_path": "benchmark_imglist/cifar10/test_mnist.txt",

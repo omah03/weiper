@@ -1,6 +1,6 @@
 exp_name: "'@{dataset.name}'_'@{network.name}'_'@{trainer.name}'_e'@{optimizer.num_epochs}'_lr'@{optimizer.lr}'_'@{mark}'/s'@{seed}'"
-output_dir: ./resultsNewS/
-checkpoint_path: "/media/dc-04-vol03/omar/Bachelor/weiper/Weiper/results/cifar10_resnet18_32x32_base_e100_lr0.1_default/s0/best_epoch96_acc0.9470.ckpt"
+output_dir: ./resultsNew/
+#checkpoint_path: "/media/dc-04-vol03/omar/Bachelor/weiper/Weiper/results/cifar10_resnet18_32x32_base_e100_lr0.1_default/s0/best_epoch96_acc0.9470.ckpt"
 freeze_body: True
 save_dir: ./SaveResult/
 save_output: True
@@ -30,7 +30,7 @@ evaluator:
 
 optimizer:
   name: sgd
-  num_epochs: 100
+  num_epochs: 200
   lr: 0.1
   momentum: 0.9
   weight_decay: 0.0005

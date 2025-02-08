@@ -6,11 +6,15 @@ postprocessor:
     lambda_1: 2.5
     lambda_2: 0.1
     n_bins: 100
-    perturbation_distance: 1.8
+    perturbation_distance: 2.1
     smoothing: 4
     smoothing_perturbed: 15
     exact_minmax: true
     n_samples_for_setup: 300000
+    start_epoch: 100
+    end_epoch :  100
+    fc_dir: /home/omar/weiper/Weiper/checkpoints/fc_layers
+
   postprocessor_sweep:
     lambda_1_list:
     - 0.1

@@ -8,138 +8,138 @@ import torch.nn as nn
 import os 
 
 
-@torch.jit.script
-def linspace(start: torch.Tensor, stop: torch.Tensor, num: int):
-    """
-    Creates a tensor of shape [num, *start.shape] whose values are evenly spaced from start to end, inclusive.
-    Replicates but the multi-dimensional behaviour of numpy.linspace in PyTorch.
-    Source: https://github.com/pytorch/pytorch/issues/61292
-    """
-    # create a tensor of 'num' steps from 0 to 1
-    steps = torch.arange(num, dtype=torch.float32, device=start.device) / (num - 1)
+# @torch.jit.script
+# def linspace(start: torch.Tensor, stop: torch.Tensor, num: int):
+#     """
+#     Creates a tensor of shape [num, *start.shape] whose values are evenly spaced from start to end, inclusive.
+#     Replicates but the multi-dimensional behaviour of numpy.linspace in PyTorch.
+#     Source: https://github.com/pytorch/pytorch/issues/61292
+#     """
+#     # create a tensor of 'num' steps from 0 to 1
+#     steps = torch.arange(num, dtype=torch.float32, device=start.device) / (num - 1)
 
-    for i in range(start.ndim):
-        steps = steps.unsqueeze(-1)
+#     for i in range(start.ndim):
+#         steps = steps.unsqueeze(-1)
 
-    # the output starts at 'start' and increments until 'stop' in each dimension
-    out = start[None] + steps * (stop - start)[None]
-    return out
-
-
-@torch.no_grad()
-def batch_histogram(
-    samples: torch.Tensor,
-    n_bins: int = 100,
-    batch_size: int = 1000,
-    device: str = "cpu",
-    disable_tqdm: bool = False,
-    bins_min_max: tuple = None,
-    probability: bool = False,
-) -> Union[torch.Tensor, torch.Tensor]:
-    """Generates a histogram (density, bins) for multiple dimensions for batch tensor shaped [n_samples, n_dims].
-
-    Args:
-        samples (torch.Tensor): Input samples.
-        n_bins (int, optional): Number of bins. Defaults to 100.
-        batch_size (int, optional): Batch size. Defaults to 200.
-        device (str, optional): Cuda device or CPU. Defaults to "cpu".
-        disable_tqdm (bool, optional): Whether to show progress bars (if True: disabled). Defaults to False.
-        bins_min_max (tuple, optional): Set min and max for the bins instead of calculating it from the samples. Defaults to None.
-        probability (bool, optional): If True, normalizes the densities to sum to one (outputs probabilities instead of densities). Defaults to False.
-
-    Returns:
-        Union[torch.Tensor, torch.Tensor]: density, bins (shaped [n_bins, n_dims], [n_bins + 1, n_dims])
-    """
-    eps = 1e-8
-    samples = samples.to(device)
-    if bins_min_max is None:
-        if not isinstance(samples, torch.Tensor):
-            min = next(iter(samples)).min(dim=0)[0]
-            max = next(iter(samples)).max(dim=0)[0]
-            for sample in samples:
-                min = torch.where(sample.min(dim=0)[0] < min, sample.min(dim=0)[0], min)
-                max = torch.where(sample.max(dim=0)[0] > max, sample.max(dim=0)[0], max)
-        else:
-            min = samples.min(dim=0)[0]
-            max = samples.max(dim=0)[0]
-        bins = linspace(min, max + eps, num=n_bins + 1)
-    else:
-        min = bins_min_max[0]
-        max = bins_min_max[1]
-        bins = linspace(min, max + eps, num=n_bins + 1)[:, None].repeat(
-            1, samples.shape[1]
-        )
-        bins = torch.cat(
-            [bins, torch.ones(1, bins.shape[-1]).to(bins.device) * np.inf], dim=0
-        )
-        bins = torch.cat(
-            [-torch.ones(1, bins.shape[-1]).to(bins.device) * np.inf, bins], dim=0
-        )
-    bin_length = bins[2:3] - bins[1:2] + 1e-12
-
-    bins = bins.to(device)
-    if not isinstance(samples, torch.Tensor) or samples.shape[0] > batch_size:
-        if isinstance(samples, torch.Tensor):
-            samples = samples.split(batch_size)
-        densities = torch.zeros(n_bins + 2, samples[0].shape[1])
-        for samples in tqdm(samples, disable=disable_tqdm):
-            samples = samples.to(device)
-
-            density = torch.logical_and(
-                (samples[None] < bins[1:, None]),
-                (samples[None] >= bins[:-1, None]),
-            )
-            density = density.to(torch.float32).mean(dim=1)
-            densities += density.cpu()
-        densities /= len(samples)
-        density = densities
-    else:
-        density = torch.logical_and(
-            (samples[None] < bins[1:, None]), (samples[None] >= bins[:-1, None])
-        )
-        density = density.to(torch.float32).mean(dim=1)
-    if not probability:
-        density /= bin_length.to(density.device)
-    else:
-        density = density[1:-1] / density.sum(dim=0)[None]
-    return density, bins
+#     # the output starts at 'start' and increments until 'stop' in each dimension
+#     out = start[None] + steps * (stop - start)[None]
+#     return out
 
 
-class UniformKernel(torch.nn.Module):
-    """Uniform kernel for smoothing the density.
+# @torch.no_grad()
+# def batch_histogram(
+#     samples: torch.Tensor,
+#     n_bins: int = 100,
+#     batch_size: int = 1000,
+#     device: str = "cpu",
+#     disable_tqdm: bool = False,
+#     bins_min_max: tuple = None,
+#     probability: bool = False,
+# ) -> Union[torch.Tensor, torch.Tensor]:
+#     """Generates a histogram (density, bins) for multiple dimensions for batch tensor shaped [n_samples, n_dims].
 
-    Args:
-        dim (int): Number of (latent/WeiPer) dimensions.
-        kernel_size (int, optional): Kernel size. Defaults to 10.
-    """
+#     Args:
+#         samples (torch.Tensor): Input samples.
+#         n_bins (int, optional): Number of bins. Defaults to 100.
+#         batch_size (int, optional): Batch size. Defaults to 200.
+#         device (str, optional): Cuda device or CPU. Defaults to "cpu".
+#         disable_tqdm (bool, optional): Whether to show progress bars (if True: disabled). Defaults to False.
+#         bins_min_max (tuple, optional): Set min and max for the bins instead of calculating it from the samples. Defaults to None.
+#         probability (bool, optional): If True, normalizes the densities to sum to one (outputs probabilities instead of densities). Defaults to False.
 
-    def __init__(
-        self,
-        dim,
-        kernel_size=10,
-    ):
-        super().__init__()
-        self.kernel = torch.nn.Conv1d(
-            dim, dim, kernel_size, padding="same", padding_mode="replicate"
-        )
-        self.kernel.weight.data = torch.zeros_like(self.kernel.weight.data)
-        self.kernel.weight.data[range(dim), range(dim)] = (
-            torch.ones(1, dim, kernel_size) / kernel_size
-        )
-        self.kernel.bias.data = torch.zeros_like(self.kernel.bias)
-        self.kernel.bias.requires_grad = False
-        self.kernel.weight.requires_grad = False
+#     Returns:
+#         Union[torch.Tensor, torch.Tensor]: density, bins (shaped [n_bins, n_dims], [n_bins + 1, n_dims])
+#     """
+#     eps = 1e-8
+#     samples = samples.to(device)
+#     if bins_min_max is None:
+#         if not isinstance(samples, torch.Tensor):
+#             min = next(iter(samples)).min(dim=0)[0]
+#             max = next(iter(samples)).max(dim=0)[0]
+#             for sample in samples:
+#                 min = torch.where(sample.min(dim=0)[0] < min, sample.min(dim=0)[0], min)
+#                 max = torch.where(sample.max(dim=0)[0] > max, sample.max(dim=0)[0], max)
+#         else:
+#             min = samples.min(dim=0)[0]
+#             max = samples.max(dim=0)[0]
+#         bins = linspace(min, max + eps, num=n_bins + 1)
+#     else:
+#         min = bins_min_max[0]
+#         max = bins_min_max[1]
+#         bins = linspace(min, max + eps, num=n_bins + 1)[:, None].repeat(
+#             1, samples.shape[1]
+#         )
+#         bins = torch.cat(
+#             [bins, torch.ones(1, bins.shape[-1]).to(bins.device) * np.inf], dim=0
+#         )
+#         bins = torch.cat(
+#             [-torch.ones(1, bins.shape[-1]).to(bins.device) * np.inf, bins], dim=0
+#         )
+#     bin_length = bins[2:3] - bins[1:2] + 1e-12
 
-    @torch.no_grad()
-    def forward(self, densities, bins=None):
-        # smoothing
-        smoothed_densities = self.kernel(densities.T).T
-        # correct densities to sum to 1.
-        if bins is not None:
-            smoothed_densities /= (smoothed_densities * (bins[1] - bins[0])).sum(dim=0)[
-                None
-            ]
-        return smoothed_densities
+#     bins = bins.to(device)
+#     if not isinstance(samples, torch.Tensor) or samples.shape[0] > batch_size:
+#         if isinstance(samples, torch.Tensor):
+#             samples = samples.split(batch_size)
+#         densities = torch.zeros(n_bins + 2, samples[0].shape[1])
+#         for samples in tqdm(samples, disable=disable_tqdm):
+#             samples = samples.to(device)
+
+#             density = torch.logical_and(
+#                 (samples[None] < bins[1:, None]),
+#                 (samples[None] >= bins[:-1, None]),
+#             )
+#             density = density.to(torch.float32).mean(dim=1)
+#             densities += density.cpu()
+#         densities /= len(samples)
+#         density = densities
+#     else:
+#         density = torch.logical_and(
+#             (samples[None] < bins[1:, None]), (samples[None] >= bins[:-1, None])
+#         )
+#         density = density.to(torch.float32).mean(dim=1)
+#     if not probability:
+#         density /= bin_length.to(density.device)
+#     else:
+#         density = density[1:-1] / density.sum(dim=0)[None]
+#     return density, bins
+
+
+# class UniformKernel(torch.nn.Module):
+#     """Uniform kernel for smoothing the density.
+
+#     Args:
+#         dim (int): Number of (latent/WeiPer) dimensions.
+#         kernel_size (int, optional): Kernel size. Defaults to 10.
+#     """
+
+#     def __init__(
+#         self,
+#         dim,
+#         kernel_size=10,
+#     ):
+#         super().__init__()
+#         self.kernel = torch.nn.Conv1d(
+#             dim, dim, kernel_size, padding="same", padding_mode="replicate"
+#         )
+#         self.kernel.weight.data = torch.zeros_like(self.kernel.weight.data)
+#         self.kernel.weight.data[range(dim), range(dim)] = (
+#             torch.ones(1, dim, kernel_size) / kernel_size
+#         )
+#         self.kernel.bias.data = torch.zeros_like(self.kernel.bias)
+#         self.kernel.bias.requires_grad = False
+#         self.kernel.weight.requires_grad = False
+
+#     @torch.no_grad()
+#     def forward(self, densities, bins=None):
+#         # smoothing
+#         smoothed_densities = self.kernel(densities.T).T
+#         # correct densities to sum to 1.
+#         if bins is not None:
+#             smoothed_densities /= (smoothed_densities * (bins[1] - bins[0])).sum(dim=0)[
+#                 None
+#             ]
+#         return smoothed_densities
 
 
 @torch.no_grad()
@@ -188,12 +188,18 @@ def calculate_weiper_space(
         if not os.path.exists(fc_path):
             raise FileNotFoundError(f"[ERROR] Missing snapshot => {fc_path}")
         fc_state = torch.load(fc_path, map_location=device)
-        w = fc_state["weight"]  
-        b = fc_state["bias"]   
+        if "fc_state_dict" in fc_state:
+            fc_state = fc_state["fc_state_dict"]
+        if "weight" not in fc_state and "fc.weight" in fc_state:
+            fc_state["weight"] = fc_state.pop("fc.weight")
+        if "bias" not in fc_state and "fc.bias" in fc_state:
+            fc_state["bias"] = fc_state.pop("fc.bias")
+        w = fc_state["weight"]
+        b = fc_state["bias"]  
         norm = w.norm(p=2, dim=1, keepdim=True) + eps_norm
         w_normalized = w / norm
         w_scaled = w_normalized * (ref_norm * perturbation_distance)
-        # w_scaled = w
+        w_scaled = w
         snapshot_weights.append(w_scaled)
         snapshot_biases.append(b)
 
@@ -233,105 +239,105 @@ def calculate_weiper_space(
     return weiper_logits, perturbed_fc, M, C
 
 
-def calculate_density(
-    latents, min_train, max_train, n_bins=100, eps=1e-8, device="cpu", verbose=False
-):
+# def calculate_density(
+#     latents, min_train, max_train, n_bins=100, eps=1e-8, device="cpu", verbose=False
+# ):
 
-    density = []
+#     density = []
 
-    for l in tqdm(latents.split(100, dim=0), disable=not verbose):
-        density_t = batch_histogram(
-            l.T,
-            n_bins,
-            bins_min_max=(min_train, max_train),
-            disable_tqdm=True,
-            probability=True,
-            device=device,
-        )[0]
+#     for l in tqdm(latents.split(100, dim=0), disable=not verbose):
+#         density_t = batch_histogram(
+#             l.T,
+#             n_bins,
+#             bins_min_max=(min_train, max_train),
+#             disable_tqdm=True,
+#             probability=True,
+#             device=device,
+#         )[0]
 
-        density.append(density_t.cpu())
-    density = torch.cat(density, dim=-1)
-    return density
-
-
-def kldiv(
-    p: torch.Tensor,
-    q: torch.Tensor,
-    eps: float = 1e-8,
-    kernel: torch.nn.Module = None,
-    symmetric: bool = True,
-    device: str = "cpu",
-) -> torch.Tensor:
-    """Calculate the Kullback-Leibler divergence after smoothing and normalizing the densities.
-    Mapping of shapes: (n_bins, n_samples_0),(n_bins, n_samples_1) -> (n_samples_0,n_samples_1)
-
-    Args:
-        p (torch.Tensor): p density tensor.
-        q (torch.Tensor): q density tensor.
-        eps (float, optional): Epsilon added to q to prevent zero entries. Defaults to 1e-8.
-        kernel (torch.nn.Module, optional): Smoothing kernel. Defaults to None.
-        symmetric (bool, optional): Calculate KLD(p,q) + KLD(q,p) if True. Defaults to True.
-        device (str, optional): Cuda device or CPU. Defaults to "cpu".
-
-    Returns:
-        torch.Tensor: uncertainty
-    """
-    kernel.to(device)
-    p = p.to(device)
-    if kernel is not None:
-        q_ = kernel(q.to(device))
-    q_ += eps
-    p_ = (p + eps).clone()
-    p_ /= p_.sum(dim=0)
-    q_ /= q_.sum(dim=0)
-    if symmetric:
-        q_p = q_.log()[:, None] - p_.log()[..., None]
-        return -(p_[..., None] * q_p).sum(dim=0) - (q_[:, None] * (-q_p)).sum(dim=0)
-    else:
-        return -(p_[..., None] * (q_.log()[:, None] - p_.log()[..., None])).sum(dim=0)
+#         density.append(density_t.cpu())
+#     density = torch.cat(density, dim=-1)
+#     return density
 
 
-def calculate_uncertainty(
-    density: torch.Tensor,
-    density_train_mean: torch.Tensor,
-    kernel: torch.nn.Module,
-    eps: float = 1e-8,
-    symmetric: bool = True,
-    device: str = "cpu",
-) -> torch.Tensor:
-    """Calculate the score (uncertainties) for given densities and the training set mean density.
+# def kldiv(
+#     p: torch.Tensor,
+#     q: torch.Tensor,
+#     eps: float = 1e-8,
+#     kernel: torch.nn.Module = None,
+#     symmetric: bool = True,
+#     device: str = "cpu",
+# ) -> torch.Tensor:
+#     """Calculate the Kullback-Leibler divergence after smoothing and normalizing the densities.
+#     Mapping of shapes: (n_bins, n_samples_0),(n_bins, n_samples_1) -> (n_samples_0,n_samples_1)
 
-    Args:
-        density (torch.Tensor): Given density tensor.
-        density_train_mean (torch.Tensor): Density mean of the training set.
-        kernel (torch.nn.Module): Smoothing kernel.
-        eps (float, optional): Epsilon added to q to prevent zero entries. Defaults to 1e-8.
-        symmetric (bool, optional): Calculate KLD(p,q) + KLD(q,p) if True. Defaults to True.
-        device (str, optional): Cuda device or CPU. Defaults to "cpu".
+#     Args:
+#         p (torch.Tensor): p density tensor.
+#         q (torch.Tensor): q density tensor.
+#         eps (float, optional): Epsilon added to q to prevent zero entries. Defaults to 1e-8.
+#         kernel (torch.nn.Module, optional): Smoothing kernel. Defaults to None.
+#         symmetric (bool, optional): Calculate KLD(p,q) + KLD(q,p) if True. Defaults to True.
+#         device (str, optional): Cuda device or CPU. Defaults to "cpu".
 
-    Returns:
-        torch.Tensor: uncertainty
-    """
-    uncertainty = []
-    for dens_t in tqdm(density.split(100, dim=-1), disable=True):
-        s = 100
-        if dens_t.shape[-1] < 100:
-            s = dens_t.shape[-1]
-            dens_t = torch.cat(
-                [dens_t, torch.ones(dens_t.shape[0], 100 - s)], dim=-1
-            ).clone()
+#     Returns:
+#         torch.Tensor: uncertainty
+#     """
+#     kernel.to(device)
+#     p = p.to(device)
+#     if kernel is not None:
+#         q_ = kernel(q.to(device))
+#     q_ += eps
+#     p_ = (p + eps).clone()
+#     p_ /= p_.sum(dim=0)
+#     q_ /= q_.sum(dim=0)
+#     if symmetric:
+#         q_p = q_.log()[:, None] - p_.log()[..., None]
+#         return -(p_[..., None] * q_p).sum(dim=0) - (q_[:, None] * (-q_p)).sum(dim=0)
+#     else:
+#         return -(p_[..., None] * (q_.log()[:, None] - p_.log()[..., None])).sum(dim=0)
 
-        uncertainty.append(
-            kldiv(
-                density_train_mean,
-                dens_t,
-                kernel=kernel,
-                eps=eps,
-                symmetric=symmetric,
-                device=device,
-            )[:, :s]
-        )
-    return torch.cat(uncertainty, dim=-1)[0]
+
+# def calculate_uncertainty(
+#     density: torch.Tensor,
+#     density_train_mean: torch.Tensor,
+#     kernel: torch.nn.Module,
+#     eps: float = 1e-8,
+#     symmetric: bool = True,
+#     device: str = "cpu",
+# ) -> torch.Tensor:
+#     """Calculate the score (uncertainties) for given densities and the training set mean density.
+
+#     Args:
+#         density (torch.Tensor): Given density tensor.
+#         density_train_mean (torch.Tensor): Density mean of the training set.
+#         kernel (torch.nn.Module): Smoothing kernel.
+#         eps (float, optional): Epsilon added to q to prevent zero entries. Defaults to 1e-8.
+#         symmetric (bool, optional): Calculate KLD(p,q) + KLD(q,p) if True. Defaults to True.
+#         device (str, optional): Cuda device or CPU. Defaults to "cpu".
+
+#     Returns:
+#         torch.Tensor: uncertainty
+#     """
+#     uncertainty = []
+#     for dens_t in tqdm(density.split(100, dim=-1), disable=True):
+#         s = 100
+#         if dens_t.shape[-1] < 100:
+#             s = dens_t.shape[-1]
+#             dens_t = torch.cat(
+#                 [dens_t, torch.ones(dens_t.shape[0], 100 - s)], dim=-1
+#             ).clone()
+
+#         uncertainty.append(
+#             kldiv(
+#                 density_train_mean,
+#                 dens_t,
+#                 kernel=kernel,
+#                 eps=eps,
+#                 symmetric=symmetric,
+#                 device=device,
+#             )[:, :s]
+#         )
+#     return torch.cat(uncertainty, dim=-1)[0]
 
 
 @torch.no_grad()

@@ -27,8 +27,8 @@ class WeiPerKLDivPostprocessor(BasePostprocessor):
         self.n_samples_for_setup = self.args.n_samples_for_setup
 
         self.fc_dir = getattr(self.args, 'fc_dir', './checkpoints/fc_layers')
-        self.start_epoch = getattr(self.args, 'start_epoch', 201)
-        self.end_epoch   = getattr(self.args, 'end_epoch', 300)
+        self.start_epoch = getattr(self.args, 'start_epoch', 1)
+        self.end_epoch   = getattr(self.args, 'end_epoch', 3)
 
         self.W_tilde = None
         self.train_min_max = None
