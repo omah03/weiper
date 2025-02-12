@@ -142,51 +142,136 @@ import os
 #         return smoothed_densities
 
 
+# @torch.no_grad()
+# def calculate_weiper_space(
+#     model: nn.Module,
+#     latents: torch.Tensor,
+#     perturbed_fc: nn.Module = None,
+#     device: str = "cpu",
+#     fc_dir: str = "./checkpoints/fc_layers", # doesnt matter
+#     start_epoch: int = 101, #doesnt matter
+#     end_epoch: int = 200, #doesnt matter    
+#     perturbation_distance: float = 2.1,
+#     batch_size: int = 256,
+# ) -> Union[torch.Tensor, nn.Module, int, int]:
+#     """Creates the perturbed fully connected layer (curly H in the paper)
+#     and calculates the perturbed logits from the penultimate latents.
+
+#     Args:
+#         model (torch.nn.Module): Instance of the neural network.
+#         latents (torch.Tensor): The penultimate latents.
+#         perturbed_fc (torch.nn.Module, optional): Precalculates perturbed fully connected layer. Defaults to None.
+#         device (str, optional): Cuda device or CPU. Defaults to "cpu".
+#         perturbation_distance (float, optional): (Relative) perturbation distance (delta in the paper). Defaults to 2.1.
+#         n_repeats (int, optional): The number of repeats (r in the paper). Defaults to 50.
+#         noise_proportional (bool, optional): Force a constant ratio between noise and class projections controlled by
+#         perturbation_distance. Defaults to True.
+#         constant_length (bool, optional): Normalize the noise to have length perturbation_distance. Defaults to True.
+#         batch_size (int, optional): Batch size. Defaults to 200.
+#         apply_softmax (bool, optional): Whether to apply softmax to the output. Defaults to False.
+#         ablation_noise_only (bool, optional): Use weight independent random projections. Defaults to False.
+
+#     Returns:
+#         Union[torch.Tensor, torch.Tensor]: noise_logits, perturbed_fc
+#     """
+
+#     eps_norm = 1e-8 
+#     snapshot_weights = []
+#     snapshot_biases = []
+
+
+#     ref_norm = model.fc.weight.norm(p=2, dim=1, keepdim=True) 
+#     ref_norm = ref_norm.to(device) 
+
+#     for ep in range(start_epoch, end_epoch + 1):
+#         fc_path = os.path.join(fc_dir, f"fc_epoch_{ep}.pth")
+#         if not os.path.exists(fc_path):
+#             raise FileNotFoundError(f"[ERROR] Missing snapshot => {fc_path}")
+#         fc_state = torch.load(fc_path, map_location=device)
+#         if "fc_state_dict" in fc_state:
+#             fc_state = fc_state["fc_state_dict"]
+#         if "weight" not in fc_state and "fc.weight" in fc_state:
+#             fc_state["weight"] = fc_state.pop("fc.weight")
+#         if "bias" not in fc_state and "fc.bias" in fc_state:
+#             fc_state["bias"] = fc_state.pop("fc.bias")
+#         w = fc_state["weight"]
+#         b = fc_state["bias"]  
+#         norm = w.norm(p=2, dim=1, keepdim=True) + eps_norm
+#         w_normalized = w / norm
+#         w_scaled = w_normalized * (ref_norm * perturbation_distance)
+#         w_scaled = w
+#         snapshot_weights.append(w_scaled)
+#         snapshot_biases.append(b)
+
+#     stacked_weight = torch.cat(snapshot_weights, dim=0)  
+#     stacked_bias   = torch.cat(snapshot_biases, dim=0)    
+
+#     M = end_epoch - start_epoch + 1    
+#     C = snapshot_weights[0].shape[0]       
+#     D = snapshot_weights[0].shape[1]
+
+#     def build_lin():
+#         big_fc = nn.Linear(D, M * C, bias=True)
+#         with torch.no_grad():
+#             big_fc.weight.copy_(stacked_weight)
+#             big_fc.bias.copy_(stacked_bias)
+#         big_fc.to(device)
+#         return big_fc
+
+#     if perturbed_fc is None:
+#         perturbed_fc = build_lin()
+#     else:
+#         if perturbed_fc.weight.shape != (M * C, D):
+#             perturbed_fc = build_lin()
+#         else:
+#             with torch.no_grad():
+#                 perturbed_fc.weight.copy_(stacked_weight)
+#                 perturbed_fc.bias.copy_(stacked_bias)
+
+#     print(f"[DEBUG] => Built big_fc with shape: {perturbed_fc.weight.shape}, bias: {perturbed_fc.bias.shape}")
+
+#     output_list = []
+#     for chunk in latents.split(batch_size):
+#         out = perturbed_fc(chunk.to(device))
+#         output_list.append(out.cpu())
+#     weiper_logits = torch.cat(output_list, dim=0)
+
+#     return weiper_logits, perturbed_fc, M, C
+
 @torch.no_grad()
 def calculate_weiper_space(
     model: nn.Module,
     latents: torch.Tensor,
     perturbed_fc: nn.Module = None,
     device: str = "cpu",
-    fc_dir: str = "./checkpoints/fc_layers",
-    start_epoch: int = 101, #doesnt matter
-    end_epoch: int = 200, #doesnt matter    
+    fc_dir: str = "./checkpoints/fc_layers",  # directory with fc_epoch_{ep}.pth
+    start_epoch: int = 101,
+    end_epoch: int = 200,
     perturbation_distance: float = 2.1,
     batch_size: int = 256,
 ) -> Union[torch.Tensor, nn.Module, int, int]:
-    """Creates the perturbed fully connected layer (curly H in the paper)
-    and calculates the perturbed logits from the penultimate latents.
-
-    Args:
-        model (torch.nn.Module): Instance of the neural network.
-        latents (torch.Tensor): The penultimate latents.
-        perturbed_fc (torch.nn.Module, optional): Precalculates perturbed fully connected layer. Defaults to None.
-        device (str, optional): Cuda device or CPU. Defaults to "cpu".
-        perturbation_distance (float, optional): (Relative) perturbation distance (delta in the paper). Defaults to 2.1.
-        n_repeats (int, optional): The number of repeats (r in the paper). Defaults to 50.
-        noise_proportional (bool, optional): Force a constant ratio between noise and class projections controlled by
-        perturbation_distance. Defaults to True.
-        constant_length (bool, optional): Normalize the noise to have length perturbation_distance. Defaults to True.
-        batch_size (int, optional): Batch size. Defaults to 200.
-        apply_softmax (bool, optional): Whether to apply softmax to the output. Defaults to False.
-        ablation_noise_only (bool, optional): Use weight independent random projections. Defaults to False.
+    """
+    For each snapshot from [start_epoch..end_epoch], we load the fc layer
+    and add a small random perturbation (scaled by 'perturbation_distance').
+    Then we stack them all => big_fc => apply to latents.
 
     Returns:
-        Union[torch.Tensor, torch.Tensor]: noise_logits, perturbed_fc
+        weiper_logits (torch.Tensor): shape [B, M*C], where M = #snapshots
+        perturbed_fc (nn.Module): the big fc layer
+        M, C (int): number of snapshots, number of classes
     """
-
-    eps_norm = 1e-8 
+    eps_norm = 1e-8
     snapshot_weights = []
     snapshot_biases = []
 
-
-    ref_norm = model.fc.weight.norm(p=2, dim=1, keepdim=True) 
-    ref_norm = ref_norm.to(device) 
+    ref_norm = model.fc.weight.norm(p=2, dim=1, keepdim=True) + eps_norm
+    ref_norm = ref_norm.to(device)
 
     for ep in range(start_epoch, end_epoch + 1):
         fc_path = os.path.join(fc_dir, f"fc_epoch_{ep}.pth")
         if not os.path.exists(fc_path):
             raise FileNotFoundError(f"[ERROR] Missing snapshot => {fc_path}")
+
         fc_state = torch.load(fc_path, map_location=device)
         if "fc_state_dict" in fc_state:
             fc_state = fc_state["fc_state_dict"]
@@ -194,21 +279,24 @@ def calculate_weiper_space(
             fc_state["weight"] = fc_state.pop("fc.weight")
         if "bias" not in fc_state and "fc.bias" in fc_state:
             fc_state["bias"] = fc_state.pop("fc.bias")
-        w = fc_state["weight"]
-        b = fc_state["bias"]  
-        norm = w.norm(p=2, dim=1, keepdim=True) + eps_norm
-        w_normalized = w / norm
-        w_scaled = w_normalized * (ref_norm * perturbation_distance)
-        w_scaled = w
-        snapshot_weights.append(w_scaled)
+
+        w = fc_state["weight"]  # shape [C, D]
+        b = fc_state["bias"]    # shape [C]
+
+        noise_vec = F.normalize(torch.randn_like(w), dim=1)
+        noise_scaled = noise_vec * (ref_norm * perturbation_distance)
+
+        w_perturbed = w + noise_scaled
+
+        snapshot_weights.append(w_perturbed)
         snapshot_biases.append(b)
 
-    stacked_weight = torch.cat(snapshot_weights, dim=0)  
-    stacked_bias   = torch.cat(snapshot_biases, dim=0)    
+    stacked_weight = torch.cat(snapshot_weights, dim=0) 
+    stacked_bias   = torch.cat(snapshot_biases, dim=0)  
 
-    M = end_epoch - start_epoch + 1    
-    C = snapshot_weights[0].shape[0]       
-    D = snapshot_weights[0].shape[1]
+    M = end_epoch - start_epoch + 1
+    C = snapshot_weights[0].shape[0] 
+    D = snapshot_weights[0].shape[1]  
 
     def build_lin():
         big_fc = nn.Linear(D, M * C, bias=True)
